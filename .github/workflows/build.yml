@@ -1,0 +1,118 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Generate project files
+        run: |
+          mkdir -p app/src/main/assets app/src/main/java/com/fouad/launcher207
+          curl -L -o app/src/main/assets/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "launcher207"
+          include(":app")
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+            id("com.android.application") version "8.5.2" apply false
+            id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+            id("com.android.application")
+            id("org.jetbrains.kotlin.android")
+          }
+          android {
+            namespace = "com.fouad.launcher207"
+            compileSdk = 34
+            defaultConfig {
+              applicationId = "com.fouad.launcher207"
+              minSdk = 21
+              targetSdk = 33
+              versionCode = 1
+              versionName = "1.0"
+            }
+            compileOptions {
+              sourceCompatibility = JavaVersion.VERSION_17
+              targetCompatibility = JavaVersion.VERSION_17
+            }
+            kotlinOptions { jvmTarget = "17" }
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+            <application android:label="Launcher 207" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" android:hardwareAccelerated="true">
+              <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:configChanges="orientation|screenSize|keyboardHidden">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.HOME"/>
+                  <category android:name="android.intent.category.DEFAULT"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > app/src/main/java/com/fouad/launcher207/MainActivity.kt <<'EOF'
+          package com.fouad.launcher207
+          import android.app.Activity
+          import android.content.Intent
+          import android.os.Bundle
+          import android.view.View
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebView
+          import org.json.JSONArray
+          import org.json.JSONObject
+          class MainActivity : Activity() {
+            override fun onCreate(b: Bundle?) {
+              super.onCreate(b)
+              val web = WebView(this)
+              web.settings.javaScriptEnabled = true
+              web.settings.domStorageEnabled = true
+              web.settings.allowFileAccess = true
+              web.addJavascriptInterface(Bridge(), "Android")
+              setContentView(web)
+              web.loadUrl("file:///android_asset/index.html")
+            }
+            override fun onWindowFocusChanged(f: Boolean) {
+              super.onWindowFocusChanged(f)
+              if (f) window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
+            override fun onBackPressed() {}
+            inner class Bridge {
+              @JavascriptInterface fun apps(): String {
+                val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                val arr = JSONArray()
+                for (r in packageManager.queryIntentActivities(i, 0)) {
+                  arr.put(JSONObject().put("label", r.loadLabel(packageManager).toString()).put("pkg", r.activityInfo.packageName))
+                }
+                return arr.toString()
+              }
+              @JavascriptInterface fun launch(pkg: String) {
+                packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) }
+              }
+            }
+          }
+          EOF
+      - run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-207-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
