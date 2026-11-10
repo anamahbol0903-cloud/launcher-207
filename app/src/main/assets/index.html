@@ -170,17 +170,20 @@ function mkDots(root){var wm=new THREE.MeshBasicMaterial({color:0xffffff});
   var a=new THREE.Mesh(new THREE.SphereGeometry(.028,12,8),wm);a.position.set(.72*s,.195,1.845);a.visible=false;root.add(a);dots.pos.push(a);
   var b=new THREE.Mesh(new THREE.SphereGeometry(.05,14,10),wm);b.position.set(.562*s,.15,1.955);b.visible=false;root.add(b);
   var h=new THREE.Mesh(new THREE.SphereGeometry(.085,14,10),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.22,depthWrite:false}));h.position.copy(b.position);h.visible=false;root.add(h);dots.low.push(b,h)})}
+function note(t){var e=document.getElementById('stx');if(e)e.textContent=t}
+var errMsg='';
 function useModel(){
  if(!window.CAR_B64||!THREE.GLTFLoader)return;
+ note('Chargement de la 207…');
  try{var b=atob(CAR_B64),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
-  new THREE.GLTFLoader().parse(u.buffer,'',function(g){
+  new THREE.GLTFLoader().parse(u.buffer,'',function(g){try{
    var old=rig.children.slice(),m=g.scene;parts={};
    m.traverse(function(o){if(o.name&&o.name.indexOf('COLIDER')==0)o.visible=false;
     var mt=o.material;if(mt&&['primary','right','left'].indexOf(mt.name)>-1&&paintMats.indexOf(mt)<0){mt.color.setHex(paint.color.getHex());mt.metalness=.35;mt.roughness=.35;paintMats.push(mt)}});
-   try{splitModel(m)}catch(e){console.log('split',e)}
+   try{splitModel(m)}catch(e){console.log('split',e);errMsg='Erreur portes : '+e.message}
    m.rotation.y=Math.PI/2;m.position.set(-.1,.53,0);
-   old.forEach(function(c){rig.remove(c)});rig.add(m);mkDots(m);applyLights();status()},function(e){console.log(e)})
- }catch(e){console.log(e)}}
+   old.forEach(function(c){rig.remove(c)});rig.add(m);mkDots(m);applyLights();status();if(errMsg)note(errMsg)}catch(e){note('Erreur : '+e.message)}},function(e){note('Erreur modèle : '+((e&&e.message)||e))})
+ }catch(e){note('Erreur : '+e.message)}}
 useModel();
 var DEMO=[['Navigation','➤','#2f6bff'],['Musique','♪','#e5384f'],['Bluetooth','✱','#2f6bff'],['Radio','◎','#ff8a3d'],['Téléphone','☎','#3ddc97'],['YouTube','▶','#ff2d3d'],['Réglages','⚙','#6b7894']];
 var ITEMS=[],REAL=false;
