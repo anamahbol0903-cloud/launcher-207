@@ -156,55 +156,97 @@ button:active{transform:scale(.98)}button:focus-visible{outline:2px solid var(--
 
   function loadCar() {
     if (!window.THREE || !THREE.GLTFLoader) {
-      showModelError("Bibliothèque 3D locale introuvable — vérifie les fichiers de l’application");
+      showModelError("Bibliothèque 3D locale absente");
       return;
     }
     const loader = new THREE.GLTFLoader();
+    $("vehicleState").textContent = "Chargement de la Peugeot…";
     loader.load("./peugeot_207.glb", gltf => {
       model = gltf.scene;
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      model.position.sub(center);
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
-      model.scale.setScalar(4.5 / maxDim);
-      model.position.y -= box.min.y * (4.5 / maxDim);
-
-      // Les pièces de chaque porte sont séparées dans le GLB.
-      // Chaque ensemble est rattaché à un pivot vertical placé côté charnières.
-      const doorSpecs = {
-        avg: { parts:["door_front_left_paint","door_front_left_trim","door_front_left_glass"], hinge:[1.055,0,0.91], sign:-1, label:"Avant gauche" },
-        avd: { parts:["door_front_right_paint","door_front_right_trim","door_front_right_glass"], hinge:[-1.055,0,0.91], sign:1, label:"Avant droite" },
-        arg: { parts:["door_rear_left_paint","door_rear_left_trim","door_rear_left_glass"], hinge:[0.91,0,-0.87], sign:1, label:"Arrière gauche" },
-        ard: { parts:["door_rear_right_paint","door_rear_right_trim","door_rear_right_glass"], hinge:[-0.91,0,-0.87], sign:-1, label:"Arrière droite" }
-      };
       model.updateMatrixWorld(true);
+
+      // Center and scale using the actual world bounds.
+      const initialBox = new THREE.Box3().setFromObject(model);
+      const initialSize = initialBox.getSize(new THREE.Vector3());
+      const initialCenter = initialBox.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(initialSize.x, initialSize.y, initialSize.z);
+      if (!Number.isFinite(maxDim) || maxDim <= 0) {
+        showModelError("Le modèle GLB est vide ou invalide");
+        return;
+      }
+      const scale = 4.5 / maxDim;
+      model.scale.setScalar(scale);
+      model.position.set(
+        -initialCenter.x * scale,
+        -initialBox.min.y * scale,
+        -initialCenter.z * scale
+      );
+      model.updateMatrixWorld(true);
+
+      // Find the four groups by exact GLB node names.
+      const find = name => {
+        let found = null;
+        model.traverse(o => { if (!found && o.name === name) found = o; });
+        return found;
+      };
+      const specs = {
+        avg: { names:["door_front_left_paint","door_front_left_trim","door_front_left_glass"], side:"left", front:true, label:"Avant gauche" },
+        avd: { names:["door_front_right_paint","door_front_right_trim","door_front_right_glass"], side:"right", front:true, label:"Avant droite" },
+        arg: { names:["door_rear_left_paint","door_rear_left_trim","door_rear_left_glass"], side:"left", front:false, label:"Arrière gauche" },
+        ard: { names:["door_rear_right_paint","door_rear_right_trim","door_rear_right_glass"], side:"right", front:false, label:"Arrière droite" }
+      };
       window.doorPivots = {};
-      window.doorSpecs = doorSpecs;
-      for (const [key, spec] of Object.entries(doorSpecs)) {
+      const missing = [];
+      for (const [key, spec] of Object.entries(specs)) {
+        const parts = spec.names.map(find);
+        if (parts.some(p => !p)) {
+          missing.push(...spec.names.filter((n,i) => !parts[i]));
+          window.doorPivots[key] = {ready:false, label:spec.label, target:0, pivot:null};
+          continue;
+        }
+
+        // Compute the hinge from the actual panel bounds, not guessed car coordinates.
+        const panel = parts[0];
+        const bounds = new THREE.Box3().setFromObject(panel);
+        const hingeX = spec.side === "left" ? bounds.max.x : bounds.min.x;
+        const hingeZ = spec.front ? bounds.max.z : bounds.max.z;
+        const hingeWorld = new THREE.Vector3(hingeX, bounds.min.y, hingeZ);
+        // Box3 returns world coordinates; convert the hinge to model-local coordinates.
+        const hinge = model.worldToLocal(hingeWorld.clone());
+
         const pivot = new THREE.Group();
         pivot.name = "hinge_" + key;
-        pivot.position.set(spec.hinge[0], spec.hinge[1], spec.hinge[2]);
+        pivot.position.copy(hinge);
         model.add(pivot);
-        pivot.updateMatrixWorld(true);
-        const parts = spec.parts.map(name => model.getObjectByName(name)).filter(Boolean);
-        if (parts.length !== spec.parts.length) {
-          console.warn("Pièces de porte manquantes pour", key, spec.parts.filter(name => !model.getObjectByName(name)));
-        }
-        for (const part of parts) pivot.attach(part);
-        window.doorPivots[key] = { pivot, target:0, sign:spec.sign, label:spec.label, ready:parts.length > 0 };
+        model.updateMatrixWorld(true);
+        parts.forEach(part => pivot.attach(part));
+
+        // Left doors swing toward +X, right doors toward -X.
+        window.doorPivots[key] = {
+          pivot, target:0,
+          sign: spec.side === "left" ? -1 : 1,
+          label:spec.label, ready:true
+        };
       }
       model.updateMatrixWorld(true);
       carRoot.add(model);
-      $("vehicleState").textContent = "Modèle 3D chargé · données véhicule non connectées";
-      $("stateLed").classList.add("warn");
-      camera.position.set(0, 2.4, 8);
-      camera.lookAt(0, 0.9, 0);
+
+      // Refit camera to the final model and keep the car above the display plinth.
+      const finalBox = new THREE.Box3().setFromObject(model);
+      const finalSize = finalBox.getSize(new THREE.Vector3());
+      const finalCenter = finalBox.getCenter(new THREE.Vector3());
+      camera.position.set(0, Math.max(2.1, finalSize.y * 1.0), Math.max(7.5, finalSize.z * 1.8));
+      camera.lookAt(0, finalCenter.y + 0.2, 0);
+      $("vehicleState").textContent = missing.length
+        ? "Peugeot chargée · pièces de portes à vérifier"
+        : "Peugeot chargée · 4 portes 3D disponibles";
+      $("stateLed").classList.toggle("warn", missing.length > 0);
+      if (missing.length) console.warn("Pièces GLB manquantes:", missing);
     }, xhr => {
       if (xhr.total) $("vehicleState").textContent = "Chargement 3D " + Math.round(xhr.loaded/xhr.total*100) + "%";
     }, err => {
-      console.error(err);
-      showModelError("Modèle GLB introuvable — vérifie le fichier à côté de index.html");
+      console.error("Erreur de chargement GLB:", err);
+      showModelError("Échec du chargement du modèle 3D — vérifie peugeot_207.glb");
     });
   }
   loadCar();
@@ -220,9 +262,9 @@ button:active{transform:scale(.98)}button:focus-visible{outline:2px solid var(--
     carRoot.rotation.y = rotationY;
     carRoot.rotation.x = rotationX;
     currentDistance += (targetDistance-currentDistance)*0.12;
-    const dir = new THREE.Vector3(Math.sin(rotationY), 0.28, Math.cos(rotationY)).normalize();
+    const dir = new THREE.Vector3(Math.sin(rotationY), 0.24, Math.cos(rotationY)).normalize();
     camera.position.set(dir.x*currentDistance, 2.0 + rotationX*2, dir.z*currentDistance);
-    camera.lookAt(0, 0.85, 0);
+    camera.lookAt(0, 0.95, 0);
     renderer.render(scene, camera);
   }
   animate();
@@ -281,7 +323,9 @@ button:active{transform:scale(.98)}button:focus-visible{outline:2px solid var(--
     const k=btn.dataset.door;
     const state=window.doorPivots && window.doorPivots[k];
     if(!state || !state.ready) {
-      $("vehicleState").textContent="Pièces de porte indisponibles : vérification du modèle nécessaire";
+      $("vehicleState").textContent = model
+        ? "Pièce de porte absente dans le GLB : " + k
+        : "La Peugeot 3D n'est pas encore chargée";
       return;
     }
     const isOpening = Math.abs(state.target) < 0.01;
