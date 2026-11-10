@@ -18,8 +18,11 @@ jobs:
       - name: Generate project files
         run: |
           mkdir -p app/src/main/assets app/src/main/java/com/fouad/launcher207
-          curl -L -o app/src/main/assets/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
-          curl -L -o app/src/main/assets/GLTFLoader.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js && (printf 'window.CAR_B64="'; base64 -w0 app/src/main/assets/peugeot_207.glb; printf '";') > app/src/main/assets/car.js
+          curl -fL --retry 3 -o app/src/main/assets/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
+          curl -fL --retry 3 -o app/src/main/assets/GLTFLoader.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js
+          test -s app/src/main/assets/peugeot_207.glb
+          test -s app/src/main/assets/three.min.js
+          test -s app/src/main/assets/GLTFLoader.js
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositories { google(); mavenCentral() } }
